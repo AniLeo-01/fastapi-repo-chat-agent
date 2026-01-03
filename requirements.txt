@@ -1,0 +1,8 @@
+fastmcp
+neo4j
+pydantic-settings
+gitpython
+openai
+fastapi
+aiofiles
+uvicorn[standard]

@@ -1,0 +1,68 @@
+[project]
+name = "fastapi-repo-chat-agent"
+version = "0.1.0"
+description = "A multi-agent system that indexes, analyzes, and answers questions about the FastAPI codebase using a knowledge graph and LLM-powered reasoning."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Aniruddha" }
+]
+keywords = ["fastapi", "multi-agent", "neo4j", "llm", "mcp", "knowledge-graph"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "fastmcp>=2.0.0",
+    "neo4j>=5.0.0",
+    "pydantic-settings>=2.0.0",
+    "gitpython>=3.1.0",
+    "openai>=1.0.0",
+    "fastapi>=0.100.0",
+    "aiofiles>=23.0.0",
+    "uvicorn[standard]>=0.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.24.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/aniruddha/fastapi-repo-chat-agent"
+Documentation = "https://github.com/aniruddha/fastapi-repo-chat-agent#readme"
+Repository = "https://github.com/aniruddha/fastapi-repo-chat-agent"
+Issues = "https://github.com/aniruddha/fastapi-repo-chat-agent/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "api-gateway/app",
+    "orchestrator-agent/app",
+    "indexer-agent/app",
+    "graph-query-agent/app",
+    "code-analyst-agent/app",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

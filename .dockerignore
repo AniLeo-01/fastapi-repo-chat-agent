@@ -1,0 +1,33 @@
+# Ignore local environment files
+**/.env
+**/.env.*
+!**/env.example
+
+# Python cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+
+# Virtual environments
+.venv
+venv
+ENV
+
+# IDE
+.idea
+.vscode
+*.swp
+
+# Git
+.git
+.gitignore
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# Misc
+*.md
+*.log
+
