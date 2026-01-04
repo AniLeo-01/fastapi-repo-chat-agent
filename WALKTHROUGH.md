@@ -34,21 +34,24 @@ A multi-agent system that indexes, analyzes, and answers questions about the Fas
 │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        │
 └─────────────────────────────────────────────────────────────────────────────┘
                                       │
-                          (FastMCP Client - Subprocess)
+                          (FastMCP Client - HTTP)
                                       │
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Orchestrator Agent (MCP)                             │
+│                    Orchestrator Agent (Container)                           │
+│                    FastMCP HTTP Server · Port 8004                          │
 │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐          │
 │  │ Intent Classifier │  │ Entity Extractor │  │ Response Synth.  │          │
 │  └──────────────────┘  └──────────────────┘  └──────────────────┘          │
 └─────────────────────────────────────────────────────────────────────────────┘
                     │                                    │
         ┌───────────┴───────────┐            ┌──────────┴──────────┐
+        │ HTTP (FastMCP)        │            │ HTTP (FastMCP)     │
         ▼                       ▼            ▼                     ▼
 ┌───────────────┐    ┌───────────────┐    ┌───────────────┐    ┌───────────────┐
 │ Graph Query   │    │ Code Analyst  │    │   Indexer     │    │    Neo4j      │
 │    Agent      │    │    Agent      │    │    Agent      │    │   Database    │
-│    (MCP)      │    │    (MCP)      │    │    (MCP)      │    │  (Port 7687)  │
+│  Port 8001    │    │  Port 8002    │    │  Port 8003    │    │  (Port 7687)  │
+│ (FastMCP HTTP)│    │ (FastMCP HTTP)│    │ (FastMCP HTTP)│    │               │
 └───────────────┘    └───────────────┘    └───────────────┘    └───────────────┘
         │                    │                    │                    │
         └────────────────────┴────────────────────┴────────────────────┘
@@ -61,30 +64,32 @@ A multi-agent system that indexes, analyzes, and answers questions about the Fas
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | API Gateway | FastAPI + Uvicorn | HTTP entry point, request routing |
-| Orchestrator Agent | FastMCP | Query routing, agent coordination, response synthesis |
-| Graph Query Agent | FastMCP + Neo4j | Execute Cypher queries, find entities |
-| Code Analyst Agent | FastMCP + OpenAI | Explain code, analyze patterns |
-| Indexer Agent | FastMCP + GitPython | Clone repos, parse AST, populate graph |
+| Orchestrator Agent | FastMCP 2.12.0 (HTTP) | Query routing, agent coordination, response synthesis |
+| Graph Query Agent | FastMCP 2.12.0 (HTTP) + Neo4j | Execute Cypher queries, find entities |
+| Code Analyst Agent | FastMCP 2.12.0 (HTTP) + OpenAI | Explain code, analyze patterns |
+| Indexer Agent | FastMCP 2.12.0 (HTTP) + GitPython | Clone repos, parse AST, populate graph |
 | Knowledge Graph | Neo4j 5 | Store code entities and relationships |
 
 ### Data Flow
 
 ```
-User Query → API Gateway → Orchestrator Agent
+User Query → API Gateway → Orchestrator Agent (HTTP)
                               │
                               ├─→ Intent Classification (LLM)
+                              │   └─→ Greeting? → Instant response (no agents)
                               ├─→ Entity Extraction (LLM)
                               │
-                              ├─→ Graph Query Agent (if needed)
+                              ├─→ Graph Query Agent (HTTP, if needed)
                               │      └─→ Neo4j: Find entities/relationships
                               │
-                              ├─→ Code Analyst Agent (if needed)
+                              ├─→ Code Analyst Agent (HTTP, if needed)
                               │      └─→ LLM: Explain code patterns
                               │
                               └─→ Response Synthesis (LLM)
                                       │
                                       ▼
                               Final Response → User
+                              (Clean format: {session_id, response})
 ```
 
 ---
@@ -107,10 +112,12 @@ User Query → API Gateway → Orchestrator Agent
 
 FastMCP (Model Context Protocol) was chosen for inter-agent communication because:
 
-- **Subprocess Isolation**: Each agent runs in its own process
+- **Microservices Architecture**: Each agent runs as a separate container with HTTP transport
+- **Independent Scaling**: Scale agents horizontally (e.g., multiple graph-query instances)
 - **Type-Safe Tools**: Pydantic-validated tool parameters
 - **Async Support**: Native async/await for non-blocking I/O
 - **Standard Protocol**: MCP is an emerging standard for AI tool use
+- **Version**: We use `fastmcp==2.12.0` for stable HTTP transport support
 
 ### Why Neo4j?
 
@@ -174,14 +181,22 @@ cp env.example .env
 # 3. Create shared.env for Docker
 cat > shared.env << EOF
 OPENAI_API_KEY=sk-your-key-here
-LLM_MODEL_ID=gpt-5-mini
+LLM_MODEL_ID=gpt-4o-mini
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 EOF
 
-# 4. Start all services
+# 4. Start all services (microservices architecture)
 docker compose up -d
+
+# This starts 6 containers:
+# - neo4j (database)
+# - graph-query-agent (port 8001)
+# - code-analyst-agent (port 8002)
+# - indexer-agent (port 8003)
+# - orchestrator-agent (port 8004)
+# - api-gateway (port 8000)
 
 # 5. Check status
 docker compose ps
@@ -220,7 +235,7 @@ uvicorn app.main:app --reload --port 8000
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key for LLM calls | Required |
-| `LLM_MODEL_ID` | Model to use | `gpt-5-mini` |
+| `LLM_MODEL_ID` | Model to use | `gpt-4o-mini` |
 | `NEO4J_URI` | Neo4j connection string | `bolt://localhost:7687` |
 | `NEO4J_USER` | Neo4j username | `neo4j` |
 | `NEO4J_PASSWORD` | Neo4j password | `password` |
@@ -346,13 +361,11 @@ Orchestrator
 ```
 
 **Response** (excerpt):
-```
-The FastAPI class is the core application class defined in fastapi/applications.py.
-It builds on Starlette and provides:
-- Automatic request/response validation using Pydantic
-- Dependency injection system
-- OpenAPI schema generation
-- Interactive documentation (Swagger UI, ReDoc)
+```json
+{
+    "session_id": "abc-123",
+    "response": "The FastAPI class is the core application class defined in fastapi/applications.py. It builds on Starlette and provides: - Automatic request/response validation using Pydantic - Dependency injection system - OpenAPI schema generation - Interactive documentation (Swagger UI, ReDoc)"
+}
 ```
 
 ---
@@ -505,22 +518,27 @@ FastAPI uses several design patterns:
 
 ### FastMCP Protocol
 
-Agents communicate using the Model Context Protocol (MCP) over stdio:
+Agents communicate using the Model Context Protocol (MCP) over HTTP (FastMCP 2.12.0):
 
 ```python
-# API Gateway spawns orchestrator
-async with Client("/app/orchestrator-agent/orchestrator_mcp.py") as client:
+# API Gateway connects to orchestrator via HTTP
+async with Client("http://orchestrator-agent:8004/mcp") as client:
     result = await client.call_tool("synthesize_response", {
         "query": "What is FastAPI?",
         "session_id": "abc-123"
     })
 
-# Orchestrator spawns graph query agent
-async with Client("/app/graph-query-agent/graph_query_mcp.py") as client:
+# Orchestrator connects to graph query agent via HTTP
+async with Client("http://graph-query-agent:8001/mcp") as client:
     result = await client.call_tool("find_entity", {
         "name": "FastAPI"
     })
 ```
+
+**Note**: Each agent runs as a separate container with its own HTTP server, enabling:
+- Independent scaling (e.g., `docker compose up -d --scale graph-query-agent=3`)
+- Fault isolation
+- Network-based deployment
 
 ### Tool Definitions
 
@@ -582,12 +600,19 @@ async def index_status() -> dict:
 ```python
 async def synthesize_response(query: str, session_id: str = None):
     # 1. Classify intent
-    analysis = await route(query)  # Uses LLM
+    analysis = await route(query)  # Uses LLM (or quick check for greetings)
     
-    # 2. Extract entities
+    # 2. Handle greetings instantly (no agent calls)
+    if analysis.get("intent") == "greeting" or not analysis.get("agents"):
+        return {
+            "session_id": session_id,
+            "response": get_greeting_response(query)
+        }
+    
+    # 3. Extract entities
     extracted = await extract_entities(query)  # Uses LLM
     
-    # 3. Call appropriate agents
+    # 4. Call appropriate agents
     agent_outputs = {}
     
     if "graph_query" in analysis["agents"]:
@@ -600,12 +625,13 @@ async def synthesize_response(query: str, session_id: str = None):
     if "code_analyst" in analysis["agents"]:
         agent_outputs["code_analyst"] = await explain(extracted["entity_name"] or query)
     
-    # 4. Synthesize final response
+    # 5. Synthesize final response
     final_response = await synthesize(query, agent_outputs)  # Uses LLM
     
-    # 5. Store in conversation memory
+    # 6. Store in conversation memory
     memory.add_turn(session_id, query, final_response)
     
+    # 7. Return clean response format
     return {"session_id": session_id, "response": final_response}
 ```
 
@@ -636,9 +662,13 @@ docker compose logs -f
 
 # Specific service
 docker compose logs -f api-gateway
+docker compose logs -f orchestrator-agent
 
 # Last N lines
 docker compose logs --tail=100 api-gateway
+
+# Scale agents for load balancing
+docker compose up -d --scale graph-query-agent=3
 ```
 
 ### Neo4j Browser
@@ -713,10 +743,4 @@ CALL db.schema.visualization()
 - [ ] Caching layer for frequently asked questions
 - [ ] More relationship types (type annotations, decorators)
 - [ ] Code snippet extraction and highlighting
-
----
-
-## License
-
-MIT License - See LICENSE file for details.
 
