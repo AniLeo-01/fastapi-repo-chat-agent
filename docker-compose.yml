@@ -73,6 +73,8 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
+    volumes:
+      - repo_cache:/tmp/fastapi-repo
     networks:
       - repo-chat-network
 

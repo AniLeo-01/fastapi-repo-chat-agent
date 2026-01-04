@@ -1,5 +1,6 @@
 import os
 import uuid
+import logging
 from typing import Dict, Any, Optional
 
 from fastmcp import FastMCP
@@ -19,6 +20,21 @@ from app.clients.graph_agent import (
 )
 from app.clients.code_agent import analyze_function, explain
 from app.clients.errors import AgentCallError
+
+# Setup logging with explicit format and force=True to override any existing config
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    force=True
+)
+logger = logging.getLogger(__name__)
+# Also ensure it outputs to stdout
+import sys
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.INFO)
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 # ---------------------------------------------------------
 # MCP Setup
@@ -98,6 +114,11 @@ async def synthesize_response(
     """
     session_id = session_id or str(uuid.uuid4())
     analysis = await route(query)
+    
+    # Log routing decision (both logger and print for visibility)
+    routing_msg = f"[ROUTING] Query: '{query}' | Intent: {analysis.get('intent')} | Agents: {analysis.get('agents')}"
+    logger.info(routing_msg)
+    print(routing_msg, flush=True)
 
     # ---------------------------------------------
     # Handle simple greetings without agent calls
@@ -183,9 +204,22 @@ async def synthesize_response(
         try:
             # Use extracted entity name if available
             search_term = entity_name if entity_name else query
+            call_msg = f"[CODE_ANALYST] Calling code_analyst agent with search_term: '{search_term}'"
+            logger.info(call_msg)
+            print(call_msg, flush=True)
             agent_outputs["code_analyst"] = await explain(search_term)
+            response_msg = f"[CODE_ANALYST] Received response: {str(agent_outputs['code_analyst'])[:200]}..."
+            logger.info(response_msg)
+            print(response_msg, flush=True)
         except AgentCallError as e:
+            error_msg = f"[CODE_ANALYST] Error calling code_analyst agent: {str(e)}"
+            logger.error(error_msg)
+            print(error_msg, flush=True)
             agent_outputs["code_analyst"] = {"error": str(e)}
+    else:
+        skip_msg = f"[CODE_ANALYST] NOT CALLED - code_analyst not in agents list: {analysis.get('agents')}"
+        logger.info(skip_msg)
+        print(skip_msg, flush=True)
 
     # ---------------------------------------------
     # Cache agent responses
