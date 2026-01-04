@@ -1,4 +1,5 @@
 import ast
+import os
 from fastmcp import FastMCP
 from app.indexing.repo_manager import index_repository
 from app.indexing.file_indexer import index_file
@@ -36,4 +37,9 @@ async def index_status() -> dict:
     return {"ready": True, "service": "indexer-agent"}
 
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport == "http":
+        port = int(os.environ.get("MCP_PORT", "8003"))
+        mcp.run(transport="http", host="0.0.0.0", port=port)
+    else:
+        mcp.run()  # Default stdio for subprocess mode

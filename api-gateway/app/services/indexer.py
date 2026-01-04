@@ -35,7 +35,7 @@ async def _run_indexer(job_id: str):
             result = await client.call_tool("index_repo", {})
             job.update(IndexJobStatus.COMPLETED)
     except Exception as e:
-        job.update(IndexJobStatus.FAILED, error=str(e))
+            job.update(IndexJobStatus.FAILED, error=str(e))
 
 
 async def get_job_status(job_id: str):

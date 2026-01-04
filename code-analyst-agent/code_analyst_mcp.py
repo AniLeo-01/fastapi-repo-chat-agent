@@ -1,4 +1,5 @@
 # apps/code-analyst-agent/code_analyst_mcp.py
+import os
 
 from fastmcp import FastMCP
 from app.utils.snippet import get_code_snippet
@@ -123,4 +124,9 @@ async def compare_implementations(name_a: str, name_b: str) -> dict:
 # Start Server
 # -----------------------------------------------------------
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport == "http":
+        port = int(os.environ.get("MCP_PORT", "8002"))
+        mcp.run(transport="http", host="0.0.0.0", port=port)
+    else:
+        mcp.run()  # Default stdio for subprocess mode

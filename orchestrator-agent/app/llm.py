@@ -16,24 +16,32 @@ def get_client() -> AsyncOpenAI:
 # ---------------------------------------------------------
 # Intent Classification
 # ---------------------------------------------------------
-INTENT_SYSTEM_PROMPT = """You are an intent classifier for a code repository chat agent.
+INTENT_SYSTEM_PROMPT = """You are an intent classifier for a code repository chat agent about FastAPI.
 
 Analyze the user's query and return a JSON object with:
-- "intent": one of "explain", "compare", "lookup", "patterns", or "general"
-- "agents": a list of agents to use, chosen from ["graph_query", "code_analyst"]
+- "intent": one of "greeting", "explain", "compare", "lookup", "patterns", or "general"
+- "agents": a list of agents to use, chosen from ["graph_query", "code_analyst"], or [] for greetings
 
 Guidelines:
+- "greeting" (hi, hello, thanks, bye, how are you, etc.): use [] (no agents needed)
 - "explain" (how something works, why something exists): use ["graph_query", "code_analyst"]
 - "compare" (differences, comparisons): use ["graph_query", "code_analyst"]
 - "lookup" (find, where, list items): use ["graph_query"]
 - "patterns" (design patterns, code patterns): use ["code_analyst"]
-- "general" (other queries): use ["graph_query", "code_analyst"]
+- "general" (substantive questions about FastAPI/code): use ["graph_query", "code_analyst"]
+
+IMPORTANT: Simple conversational messages like "hi", "hello", "thanks", "ok", "bye" should be classified as "greeting" with agents: []
 
 Return ONLY valid JSON, no other text."""
 
 
 async def classify_intent(query: str) -> dict:
     """Classify the user's query intent and determine which agents to use."""
+    # Quick check for obvious greetings (skip LLM call)
+    greeting_words = {'hi', 'hello', 'hey', 'thanks', 'thank you', 'bye', 'goodbye', 'ok', 'okay', 'yes', 'no', 'sure'}
+    if query.lower().strip().rstrip('!?.') in greeting_words:
+        return {"intent": "greeting", "agents": []}
+    
     client = get_client()
     response = await client.chat.completions.create(
         model=settings.LLM_MODEL_ID,

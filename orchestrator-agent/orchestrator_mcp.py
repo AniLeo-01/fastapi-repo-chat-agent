@@ -1,3 +1,4 @@
+import os
 import uuid
 from typing import Dict, Any, Optional
 
@@ -99,6 +100,30 @@ async def synthesize_response(
     analysis = await route(query)
 
     # ---------------------------------------------
+    # Handle simple greetings without agent calls
+    # ---------------------------------------------
+    if analysis.get("intent") == "greeting" or not analysis.get("agents"):
+        greeting_responses = {
+            "hi": "Hello! I'm a FastAPI codebase assistant. How can I help you explore the FastAPI repository?",
+            "hello": "Hi there! I can help you understand the FastAPI codebase. What would you like to know?",
+            "hey": "Hey! Ready to help you explore FastAPI. What are you curious about?",
+            "thanks": "You're welcome! Let me know if you have more questions.",
+            "thank you": "Happy to help! Feel free to ask more questions about FastAPI.",
+            "bye": "Goodbye! Come back anytime you have questions about FastAPI.",
+            "goodbye": "See you later! Happy coding!",
+            "ok": "Got it! What would you like to know about FastAPI?",
+            "okay": "Alright! Feel free to ask me anything about the FastAPI codebase.",
+            "yes": "Great! What would you like to explore in the FastAPI repository?",
+            "no": "No problem. Let me know when you have questions!",
+            "sure": "Perfect! What can I help you with?",
+        }
+        query_lower = query.lower().strip().rstrip('!?.')
+        response = greeting_responses.get(query_lower, f"Hi! I'm here to help you explore the FastAPI codebase. Ask me about classes, functions, or how things work!")
+        
+        memory.add_turn(session_id=session_id, query=query, response=response)
+        return {"session_id": session_id, "response": response}
+
+    # ---------------------------------------------
     # Persist user context (if provided)
     # ---------------------------------------------
     if user_context:
@@ -197,4 +222,9 @@ async def synthesize_response(
 # Run MCP Server
 # ---------------------------------------------------------
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport == "http":
+        port = int(os.environ.get("MCP_PORT", "8004"))
+        mcp.run(transport="http", host="0.0.0.0", port=port)
+    else:
+        mcp.run()  # Default stdio for subprocess mode

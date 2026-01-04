@@ -1,5 +1,5 @@
+import os
 from typing import Any
-
 
 from fastmcp import FastMCP
 from app.graph.query import (
@@ -44,4 +44,9 @@ async def execute_query(query: str) -> dict:
     return {"results": await execute_safe_cypher(query)}
 
 if __name__ == "__main__":
-    mcp.run()
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport == "http":
+        port = int(os.environ.get("MCP_PORT", "8001"))
+        mcp.run(transport="http", host="0.0.0.0", port=port)
+    else:
+        mcp.run()  # Default stdio for subprocess mode

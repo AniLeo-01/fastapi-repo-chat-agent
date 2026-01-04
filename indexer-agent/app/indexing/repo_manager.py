@@ -32,6 +32,7 @@ async def update_repo():
     await loop.run_in_executor(None, _update_repo_sync)
 
 async def index_repository():
+    # clones the repository from the URL in the settings
     await update_repo()
     py_files = list(Path(settings.REPO_DIR).rglob("*.py"))
     

@@ -1,0 +1,66 @@
+services:
+  # ===========================================
+  # Neo4j Graph Database
+  # ===========================================
+  neo4j:
+    image: neo4j:5-community
+    container_name: fastapi-repo-neo4j
+    ports:
+      - "7474:7474"  # HTTP browser
+      - "7687:7687"  # Bolt protocol
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - repo-chat-network
+
+  # ===========================================
+  # API Gateway (main entry point)
+  # Includes all MCP agents as they are spawned
+  # as subprocesses via fastmcp.Client
+  # ===========================================
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fastapi-repo-api
+    ports:
+      - "8000:8000"
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - FASTAPI_REPO_URL=${FASTAPI_REPO_URL:-https://github.com/fastapi/fastapi.git}
+      - REPO_DIR=/tmp/fastapi-repo
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-gpt-5-mini}
+      - DOCKER_ENV=1
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      - repo_cache:/tmp/fastapi-repo
+      - ./shared.env:/app/shared.env:ro
+    networks:
+      - repo-chat-network
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  repo_cache:
+
+networks:
+  repo-chat-network:
+    driver: bridge
+

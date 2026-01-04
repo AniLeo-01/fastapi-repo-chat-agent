@@ -12,6 +12,6 @@ async def check_agent(path: str) -> bool:
         async with Client(path) as client:
             # List tools to verify the server is responding
             await client.list_tools()
-            return True
+        return True
     except Exception:
         return False

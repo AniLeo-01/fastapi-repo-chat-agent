@@ -4,10 +4,11 @@ A multi-agent system that indexes, analyzes, and answers questions about the Fas
 
 ## Features
 
-- 🤖 **Multi-Agent Architecture**: Specialized agents for indexing, querying, and analysis
+- 🤖 **Microservices Architecture**: Each agent runs as a separate container for independent scaling
 - 🔍 **Knowledge Graph**: Neo4j-powered code entity and relationship storage
 - 💬 **Natural Language Queries**: Ask questions about FastAPI in plain English
 - 🧠 **LLM-Powered Synthesis**: Intelligent response generation using GPT models
+- ⚡ **Smart Greeting Detection**: Instant responses for simple greetings without agent calls
 - 🐳 **Docker Ready**: One-command deployment with `docker compose up`
 
 ---
@@ -36,31 +37,37 @@ A multi-agent system that indexes, analyzes, and answers questions about the Fas
                                        ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
 │                              API GATEWAY                                        │
-│                         FastAPI · Port 8000                                     │
+│                    FastAPI Container · Port 8000                                │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
 │  │  /api/chat   │  │ /api/index/* │  │/api/agents/* │  │ /api/graph/* │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘         │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                        │
-                           FastMCP Client (Subprocess)
+                           FastMCP Client (HTTP)
                                        │
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           ORCHESTRATOR AGENT                                    │
-│                              (FastMCP Server)                                   │
+│                      ORCHESTRATOR AGENT (Container)                            │
+│                    FastMCP HTTP Server · Port 8004                             │
 │  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────────┐         │
 │  │  Intent Classifier │  │  Entity Extractor  │  │ Response Synthesizer│        │
 │  │       (LLM)        │  │       (LLM)        │  │       (LLM)         │        │
 │  └────────────────────┘  └────────────────────┘  └────────────────────┘         │
+│  ┌─────────────────────────────────────────────────────────────────────┐       │
+│  │  Greeting Detection (Fast Path - No Agent Calls)                   │       │
+│  └─────────────────────────────────────────────────────────────────────┘       │
 │                                                                                 │
 │  Tools: analyze_query, route_to_agents, synthesize_response                     │
 └─────────────────────────────────────────────────────────────────────────────────┘
                     │                                           │
         ┌───────────┴─────────────┐                 ┌──────────┴──────────┐
+        │ HTTP (FastMCP 2.12.0)  │                 │ HTTP (FastMCP)     │
         ▼                         ▼                 ▼                     ▼
 ┌───────────────────┐   ┌───────────────────┐   ┌───────────────────┐   ┌─────────────┐
 │  GRAPH QUERY      │   │  CODE ANALYST     │   │    INDEXER        │   │   NEO4J     │
 │     AGENT         │   │     AGENT         │   │     AGENT         │   │  DATABASE   │
-│  (FastMCP Server) │   │  (FastMCP Server) │   │  (FastMCP Server) │   │ Port 7687   │
+│  Container        │   │  Container        │   │  Container        │   │  Container  │
+│  Port 8001        │   │  Port 8002        │   │  Port 8003        │   │ Port 7687   │
+│  (FastMCP HTTP)   │   │  (FastMCP HTTP)   │   │  (FastMCP HTTP)   │   │             │
 ├───────────────────┤   ├───────────────────┤   ├───────────────────┤   ├─────────────┤
 │ • find_entity     │   │ • analyze_function│   │ • index_repo      │   │ • Classes   │
 │ • get_dependencies│   │ • explain_impl    │   │ • index_file      │   │ • Functions │
@@ -69,10 +76,19 @@ A multi-agent system that indexes, analyzes, and answers questions about the Fas
 │ • execute_query   │   │                   │   │                   │   │             │
 └───────────────────┘   └───────────────────┘   └───────────────────┘   └─────────────┘
         │                         │                       │                     │
+        │                         │                       │                     │
         └─────────────────────────┴───────────────────────┴─────────────────────┘
                                            │
                                    Neo4j Bolt Protocol
+                                           │
+                                   (All agents connect)
 ```
+
+**Architecture Notes:**
+- **Microservices**: Each agent runs in a separate Docker container
+- **HTTP Transport**: Agents communicate via FastMCP HTTP (version 2.12.0)
+- **Independent Scaling**: Each agent can be scaled independently
+- **Fast Path**: Greetings bypass agent calls for instant responses
 
 ### Data Flow
 
@@ -81,41 +97,73 @@ A multi-agent system that indexes, analyzes, and answers questions about the Fas
 │                              QUERY PROCESSING FLOW                              │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
+│  Example 1: Simple Greeting                                                     │
+│  ──────────────────────────────────────────────────────────────────────────────│
+│  User Query: "Hello"                                                            │
+│       │                                                                         │
+│       ▼                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐            │
+│  │ 1. GREETING DETECTION (LLM)                                     │            │
+│  │    Input:  "Hello"                                               │            │
+│  │    Output: { is_greeting: true }                                 │            │
+│  └─────────────────────────────────────────────────────────────────┘            │
+│       │                                                                         │
+│       ▼                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐            │
+│  │ 2. INSTANT RESPONSE (No Agent Calls)                            │            │
+│  │    Output: "Hi there! I can help you understand..."             │            │
+│  └─────────────────────────────────────────────────────────────────┘            │
+│                                                                                 │
+│  Example 2: Complex Query                                                        │
+│  ──────────────────────────────────────────────────────────────────────────────│
 │  User Query: "What is the FastAPI class?"                                       │
 │       │                                                                         │
 │       ▼                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐            │
-│  │ 1. INTENT CLASSIFICATION (LLM)                                  │            │
+│  │ 1. GREETING DETECTION (LLM)                                     │            │
+│  │    Input:  "What is the FastAPI class?"                         │            │
+│  │    Output: { is_greeting: false }                               │            │
+│  └─────────────────────────────────────────────────────────────────┘            │
+│       │                                                                         │
+│       ▼                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐            │
+│  │ 2. INTENT CLASSIFICATION (LLM)                                  │            │
 │  │    Input:  "What is the FastAPI class?"                         │            │
 │  │    Output: { intent: "lookup", agents: ["graph_query"] }        │            │
 │  └─────────────────────────────────────────────────────────────────┘            │
 │       │                                                                         │
 │       ▼                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐            │
-│  │ 2. ENTITY EXTRACTION (LLM)                                      │            │
+│  │ 3. ENTITY EXTRACTION (LLM)                                      │            │
 │  │    Input:  "What is the FastAPI class?"                         │            │
 │  │    Output: { entity_name: "FastAPI", query_type: "find_entity" }│            │
 │  └─────────────────────────────────────────────────────────────────┘            │
 │       │                                                                         │
 │       ▼                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐            │
-│  │ 3. AGENT DISPATCH                                               │            │
-│  │    Route to: Graph Query Agent                                  │            │
+│  │ 4. AGENT DISPATCH (HTTP)                                         │            │
+│  │    Route to: Graph Query Agent (http://graph-query-agent:8001) │            │
 │  │    Tool:     find_entity("FastAPI")                             │            │
 │  └─────────────────────────────────────────────────────────────────┘            │
 │       │                                                                         │
 │       ▼                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐            │
-│  │ 4. GRAPH QUERY                                                  │            │
+│  │ 5. GRAPH QUERY (Neo4j)                                          │            │
 │  │    Cypher: MATCH (c:Class {name: 'FastAPI'}) RETURN c           │            │
 │  │    Result: { file: "fastapi/applications.py", lines: 48-4669 }  │            │
 │  └─────────────────────────────────────────────────────────────────┘            │
 │       │                                                                         │
 │       ▼                                                                         │
 │  ┌─────────────────────────────────────────────────────────────────┐            │
-│  │ 5. RESPONSE SYNTHESIS (LLM)                                     │            │
+│  │ 6. RESPONSE SYNTHESIS (LLM)                                    │            │
 │  │    Combines: Graph results + LLM knowledge                      │            │
 │  │    Output:   Comprehensive explanation of FastAPI class         │            │
+│  └─────────────────────────────────────────────────────────────────┘            │
+│       │                                                                         │
+│       ▼                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐            │
+│  │ 7. RESPONSE FORMAT                                              │            │
+│  │    { session_id: "uuid", response: "..." }                      │            │
 │  └─────────────────────────────────────────────────────────────────┘            │
 │                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -174,22 +222,37 @@ cd fastapi-repo-chat-agent
 # 2. Create shared.env for Docker
 cat > shared.env << EOF
 OPENAI_API_KEY=sk-your-key-here
-LLM_MODEL_ID=gpt-5-mini
+LLM_MODEL_ID=gpt-4o-mini
 NEO4J_URI=bolt://neo4j:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 EOF
 
-# 3. Start all services
+# 3. Start all services (microservices architecture)
 docker compose up -d
+
+# Services will start:
+# - neo4j (port 7687, 7474)
+# - graph-query-agent (port 8001)
+# - code-analyst-agent (port 8002)
+# - indexer-agent (port 8003)
+# - orchestrator-agent (port 8004)
+# - api-gateway (port 8000)
 
 # 4. Verify services are running
 docker compose ps
 
 # Expected output:
-# NAME                 STATUS              PORTS
-# fastapi-repo-api     Up                  0.0.0.0:8000->8000/tcp
-# fastapi-repo-neo4j   Up (healthy)        0.0.0.0:7474->7474/tcp, 0.0.0.0:7687->7687/tcp
+# NAME                                    STATUS              PORTS
+# fastapi-repo-api                        Up                  0.0.0.0:8000->8000/tcp
+# fastapi-repo-neo4j                      Up (healthy)        0.0.0.0:7474->7474/tcp, 0.0.0.0:7687->7687/tcp
+# fastapi-repo-chat-agent-orchestrator... Up                  8004/tcp
+# fastapi-repo-chat-agent-graph-query...  Up                  8001/tcp
+# fastapi-repo-chat-agent-code-analyst... Up                  8002/tcp
+# fastapi-repo-chat-agent-indexer-agent   Up                  8003/tcp
+
+# 4b. Scale agents independently (optional)
+docker compose up -d --scale graph-query-agent=3
 
 # 5. Check agent health
 curl http://localhost:8000/api/agents/health
@@ -239,7 +302,7 @@ uvicorn app.main:app --reload --port 8000
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OPENAI_API_KEY` | ✅ Yes | - | OpenAI API key for LLM calls |
-| `LLM_MODEL_ID` | No | `gpt-5-mini` | Model for intent/synthesis |
+| `LLM_MODEL_ID` | No | `gpt-4o-mini` | Model for intent/synthesis |
 | `NEO4J_URI` | No | `bolt://localhost:7687` | Neo4j connection string |
 | `NEO4J_USER` | No | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | No | `password` | Neo4j password |
@@ -417,13 +480,12 @@ Send a natural language query to the multi-agent system.
 **Response**:
 ```json
 {
-    "content": [...],
-    "data": {
-        "session_id": "uuid",
-        "response": "The FastAPI class is..."
-    }
+    "session_id": "uuid",
+    "response": "The FastAPI class is..."
 }
 ```
+
+**Note**: Simple greetings like "hi", "hello", "thanks" are detected and return instant responses without calling agents.
 
 **Example**:
 ```bash
@@ -510,12 +572,15 @@ Get knowledge graph statistics.
 
 | Decision | Rationale |
 |----------|-----------|
-| **Subprocess Isolation** | Agents run in separate processes, preventing memory leaks from affecting others |
+| **Microservices Architecture** | Each agent runs as a separate container, enabling independent scaling and fault isolation |
+| **HTTP Transport** | Agents communicate via HTTP (FastMCP 2.12.0), allowing network-based deployment |
 | **Type-Safe Tools** | Pydantic validation ensures correct parameter types |
 | **Standard Protocol** | MCP is an emerging standard for AI tool use |
 | **Async Native** | Non-blocking I/O for better throughput |
 
-**Trade-off**: Subprocess spawning has overhead (~100ms per call). For high-throughput scenarios, consider in-process agents or gRPC.
+**Note**: We use `fastmcp==2.12.0` as it has stable HTTP transport support. Newer versions may have issues with tool execution over HTTP.
+
+**Trade-off**: HTTP communication adds network latency (~10-50ms per call), but enables true microservices with horizontal scaling.
 
 ### Why Neo4j for Knowledge Storage?
 
@@ -547,6 +612,18 @@ Two-stage approach chosen for accuracy:
 
 **Trade-off**: Two LLM calls instead of one, but significantly better accuracy for complex queries.
 
+### Greeting Detection for Performance
+
+Simple greetings are detected early to avoid unnecessary agent calls:
+
+```python
+# Fast path for greetings
+if await is_greeting(query):
+    return {"session_id": session_id, "response": "Hi there! I can help..."}
+```
+
+**Rationale**: Instant responses for common greetings improve user experience and reduce LLM costs.
+
 ### Docker Environment Detection
 
 Agents detect Docker environment to use correct Neo4j hostname:
@@ -558,7 +635,7 @@ def _get_neo4j_default():
     return "bolt://localhost:7687"  # Local development
 ```
 
-**Rationale**: FastMCP subprocesses don't inherit parent environment variables, so we detect Docker at runtime.
+**Rationale**: In microservices architecture, each container needs to know the correct service names for inter-container communication.
 
 ---
 
@@ -572,7 +649,7 @@ def _get_neo4j_default():
 | **Single repository support** | Can only index one repo at a time | Re-index to switch repos |
 | **Limited relationship extraction** | Not all code relationships captured | Use raw Cypher for complex queries |
 | **No semantic code search** | Relies on exact entity names | Use broader search terms |
-| **Subprocess environment isolation** | Env vars not passed to agents | Use shared.env file in Docker |
+| **HTTP network latency** | Agent calls add ~10-50ms overhead | Acceptable trade-off for microservices benefits |
 | **Neo4j deadlocks with high concurrency** | Indexing may fail | Reduced to 3 concurrent file indexes |
 
 ### Planned Improvements
@@ -604,17 +681,21 @@ Contributions welcome! Areas that need help:
 ### Common Commands
 
 ```bash
-# Start services
+# Start all services (microservices)
 docker compose up -d
+
+# Scale specific agents
+docker compose up -d --scale graph-query-agent=3
 
 # Stop services
 docker compose down
 
 # View logs
 docker compose logs -f api-gateway
+docker compose logs -f orchestrator-agent
 
 # Rebuild after code changes
-docker compose up -d --build api-gateway
+docker compose up -d --build api-gateway orchestrator-agent
 
 # Access Neo4j browser
 open http://localhost:7474

@@ -11,15 +11,16 @@ DOCKER_ENV_FILE = Path("/app/shared.env")
 if DOCKER_ENV_FILE.exists():
     ENV_FILE = DOCKER_ENV_FILE
 
-# MCP agent paths (absolute paths for subprocess spawning)
-CODE_AGENT_PATH = str(AGENT_ROOT / "code-analyst-agent" / "code_analyst_mcp.py")
-GRAPH_AGENT_PATH = str(AGENT_ROOT / "graph-query-agent" / "graph_query_mcp.py")
-
 
 class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     DEFAULT_TIMEOUT: int = 20
-    LLM_MODEL_ID: str = "gpt-5-mini"
+    LLM_MODEL_ID: str = "gpt-4o-mini"
+    
+    # Agent URLs (for microservices mode) or paths (for subprocess mode)
+    # URLs take precedence if set
+    CODE_AGENT_URL: str | None = None
+    GRAPH_AGENT_URL: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
@@ -29,3 +30,18 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Determine agent connection strings
+# Use URLs if provided (microservices), otherwise use file paths (subprocess)
+def get_code_agent_path() -> str:
+    if settings.CODE_AGENT_URL:
+        return settings.CODE_AGENT_URL
+    return str(AGENT_ROOT / "code-analyst-agent" / "code_analyst_mcp.py")
+
+def get_graph_agent_path() -> str:
+    if settings.GRAPH_AGENT_URL:
+        return settings.GRAPH_AGENT_URL
+    return str(AGENT_ROOT / "graph-query-agent" / "graph_query_mcp.py")
+
+CODE_AGENT_PATH = get_code_agent_path()
+GRAPH_AGENT_PATH = get_graph_agent_path()

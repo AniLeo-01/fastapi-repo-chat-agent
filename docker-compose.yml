@@ -1,3 +1,15 @@
+# Microservices Architecture - Each agent runs as a separate container
+# 
+# Benefits:
+# - Independent scaling (scale graph-query separately from indexer)
+# - Better resource isolation
+# - Horizontal scaling with replicas
+# - Easier debugging and monitoring per agent
+#
+# Usage:
+#   docker compose up -d
+#   docker compose up -d --scale graph-query-agent=3
+
 services:
   # ===========================================
   # Neo4j Graph Database
@@ -6,12 +18,11 @@ services:
     image: neo4j:5-community
     container_name: fastapi-repo-neo4j
     ports:
-      - "7474:7474"  # HTTP browser
-      - "7687:7687"  # Bolt protocol
+      - "7474:7474"
+      - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/password
       - NEO4J_PLUGINS=["apoc"]
-      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
@@ -25,13 +36,95 @@ services:
       - repo-chat-network
 
   # ===========================================
-  # API Gateway (main entry point)
-  # Includes all MCP agents as they are spawned
-  # as subprocesses via fastmcp.Client
+  # Graph Query Agent (scalable)
+  # ===========================================
+  graph-query-agent:
+    build:
+      context: ./graph-query-agent
+      dockerfile: Dockerfile
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - MCP_TRANSPORT=http
+      - MCP_PORT=8001
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    networks:
+      - repo-chat-network
+    # Can scale: docker compose up -d --scale graph-query-agent=3
+
+  # ===========================================
+  # Code Analyst Agent (scalable)
+  # ===========================================
+  code-analyst-agent:
+    build:
+      context: ./code-analyst-agent
+      dockerfile: Dockerfile
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-gpt-4o-mini}
+      - MCP_TRANSPORT=http
+      - MCP_PORT=8002
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    networks:
+      - repo-chat-network
+
+  # ===========================================
+  # Indexer Agent
+  # ===========================================
+  indexer-agent:
+    build:
+      context: ./indexer-agent
+      dockerfile: Dockerfile
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=password
+      - FASTAPI_REPO_URL=${FASTAPI_REPO_URL:-https://github.com/fastapi/fastapi.git}
+      - REPO_DIR=/tmp/fastapi-repo
+      - MCP_TRANSPORT=http
+      - MCP_PORT=8003
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      - repo_cache:/tmp/fastapi-repo
+    networks:
+      - repo-chat-network
+
+  # ===========================================
+  # Orchestrator Agent
+  # ===========================================
+  orchestrator-agent:
+    build:
+      context: ./orchestrator-agent
+      dockerfile: Dockerfile
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-gpt-4o-mini}
+      - GRAPH_AGENT_URL=http://graph-query-agent:8001/mcp
+      - CODE_AGENT_URL=http://code-analyst-agent:8002/mcp
+      - MCP_TRANSPORT=http
+      - MCP_PORT=8004
+    depends_on:
+      - graph-query-agent
+      - code-analyst-agent
+    networks:
+      - repo-chat-network
+
+  # ===========================================
+  # API Gateway (entry point)
   # ===========================================
   api-gateway:
     build:
-      context: .
+      context: ./api-gateway
       dockerfile: Dockerfile
     container_name: fastapi-repo-api
     ports:
@@ -41,16 +134,13 @@ services:
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=password
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - FASTAPI_REPO_URL=${FASTAPI_REPO_URL:-https://github.com/fastapi/fastapi.git}
-      - REPO_DIR=/tmp/fastapi-repo
-      - LLM_MODEL_ID=${LLM_MODEL_ID:-gpt-5-mini}
-      - DOCKER_ENV=1
+      - ORCHESTRATOR_URL=http://orchestrator-agent:8004/mcp
+      - INDEXER_URL=http://indexer-agent:8003/mcp
+      - GRAPH_QUERY_URL=http://graph-query-agent:8001/mcp
+      - CODE_ANALYST_URL=http://code-analyst-agent:8002/mcp
     depends_on:
-      neo4j:
-        condition: service_healthy
-    volumes:
-      - repo_cache:/tmp/fastapi-repo
-      - ./shared.env:/app/shared.env:ro
+      - orchestrator-agent
+      - indexer-agent
     networks:
       - repo-chat-network
     restart: unless-stopped
